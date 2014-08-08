@@ -50,7 +50,9 @@ static vector<int64_t> _PrevTimestamp(c_maxCamerasToUse, 0);
 
 static vector<double> _PC_frame_start(c_maxCamerasToUse, 0.0);
 static vector<double> _PC_frame_stop(c_maxCamerasToUse, 0.0);
+static vector<vector<double>> _PC_frame_time_table(c_maxCamerasToUse, std::vector<double>(c_countOfImagesToGrab));
 
+static char IsBurstStarted = 0;
 
 class CSampleImageEventHandler : public CBaslerUsbImageEventHandler //CImageEventHandler //CBaslerUsbImageEventHandler
 {
@@ -67,13 +69,18 @@ public:
 
 		if (IsReadable(ptrGrabResult->ChunkTimestamp))
 			_CurrTimestamp[cameraContextValue] = ptrGrabResult->ChunkTimestamp.GetValue();
+			//_PC_frame_time_table[][]  = ptrGrabResult->ChunkTimestamp.GetValue();
 
 		//cout << "Camera " << cameraContextValue << ": " << camera.GetDeviceInfo().GetModelName() << (_CurrTimestamp[cameraContextValue] - _PrevTimestamp[cameraContextValue]) << endl;
 
-		cout << "Camera " << cameraContextValue << ": " << camera.GetDeviceInfo().GetModelName() << "fstart: " << _PC_frame_start[cameraContextValue] << "fstop: "<<_PC_frame_stop[cameraContextValue]<< endl;
+		//cout << "Camera " << cameraContextValue << ": " << camera.GetDeviceInfo().GetModelName() << "fstart: " << _PC_frame_start[cameraContextValue] << "fstop: "<<_PC_frame_stop[cameraContextValue]<< endl;
 
+		cout << "Camera " << cameraContextValue << ": " << _PC_frame_stop[cameraContextValue] << endl;
 
 		_PrevTimestamp[cameraContextValue] = _CurrTimestamp[cameraContextValue];
+
+		camera.ExecuteSoftwareTrigger();
+		_PC_frame_start[cameraContextValue] = (double)clock() / CLOCKS_PER_SEC;
 		
 	}
 };
@@ -134,66 +141,53 @@ int main(int argc, char* argv[])
 			}
 
 			// Enable time stamp chunks.
-			cameras[i].ChunkSelector.SetValue(ChunkSelector_Timestamp);
-			cameras[i].ChunkEnable.SetValue(true);
+			//cameras[i].ChunkSelector.SetValue(ChunkSelector_Timestamp);
+			//cameras[i].ChunkEnable.SetValue(true);
 
         }
 
-        // Starts grabbing for all cameras starting with index 0. The grabbing
-        // is started for one camera after the other. That's why the images of all
-        // cameras are not taken at the same time.
-        // However, a hardware trigger setup can be used to cause all cameras to grab images synchronously.
-        // According to their default configuration, the cameras are
-        // set up for free-running continuous acquisition.
-		cameras.StartGrabbing(GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
-
-        // This smart pointer will receive the grab result data.
-		//CBaslerUsbGrabResultPtr ptrGrabResult;
-		//camera.StartGrabbing(GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
+		//cameras.StartGrabbing(10, GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
+		for (size_t i = 0; i < cameras.GetSize(); ++i)
+		{
+			cameras[i].StartGrabbing(21, GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
+		}
+        
 
 		cerr << endl << "Enter \"t\" to trigger the camera or \"e\" to exit and press enter? (t/e)" << endl << endl;
 
-		// Wait for user input to trigger the camera or exit the program.
-		// The grabbing is stopped, the device is closed and destroyed automatically when the camera object goes out of scope.
 		char key;
+
 		do
 		{
-			cin.get(key);
-			if ((key == 't' || key == 'T'))
+			if (IsBurstStarted == 0)
+			{
+				cin.get(key);
+				if ((key == 't' || key == 'T'))
+				{
+					for (size_t i = 0; i < cameras.GetSize(); ++i)
+					{
+						// Execute the software trigger. Wait up to 100 ms for the camera to be ready for trigger.
+						if (cameras[i].WaitForFrameTriggerReady(100, TimeoutHandling_ThrowException))
+						{
+							_PC_frame_start[i] = (double)clock() / CLOCKS_PER_SEC;
+							cameras[i].ExecuteSoftwareTrigger();
+						}
+					}
+				}
+				IsBurstStarted = 1;
+			}
+			else
 			{
 				for (size_t i = 0; i < cameras.GetSize(); ++i)
 				{
-					// Execute the software trigger. Wait up to 100 ms for the camera to be ready for trigger.
-					if (cameras[i].WaitForFrameTriggerReady(100, TimeoutHandling_ThrowException))
-					{
-						_PC_frame_start[i] = (double)clock() / CLOCKS_PER_SEC;
-						cameras[i].ExecuteSoftwareTrigger();
-					}
+					_PC_frame_start[i] = (double)clock() / CLOCKS_PER_SEC;
+					cameras[i].ExecuteSoftwareTrigger();
 				}
 			}
+
 		} while ((key != 'e') && (key != 'E'));
 
 
-        // Grab c_countOfImagesToGrab from the cameras.
-		/*
-		for( int i = 0; i < c_countOfImagesToGrab && cameras.IsGrabbing(); ++i)
-        {
-            cameras.RetrieveResult( 5000, ptrGrabResult, TimeoutHandling_ThrowException);
-            intptr_t cameraContextValue = ptrGrabResult->GetCameraContext();
-            //Pylon::DisplayImage(cameraContextValue, ptrGrabResult);
-
-			if (PayloadType_ChunkData != ptrGrabResult->GetPayloadType()) throw RUNTIME_EXCEPTION("Unexpected payload type received.");
-			
-
-			if (IsReadable(ptrGrabResult->ChunkTimestamp))
-				_CurrTimestamp[cameraContextValue] = ptrGrabResult->ChunkTimestamp.GetValue();
-			
-
-			cout << "Camera " << cameraContextValue << ": " << cameras[cameraContextValue].GetDeviceInfo().GetModelName() << (_CurrTimestamp[cameraContextValue] - _PrevTimestamp[cameraContextValue]) << endl;
-			_PrevTimestamp[cameraContextValue] = _CurrTimestamp[cameraContextValue];
-			
-		}
-		*/
 
     }
     catch (GenICam::GenericException &e)
