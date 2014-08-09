@@ -50,9 +50,12 @@ static vector<int64_t> _PrevTimestamp(c_maxCamerasToUse, 0);
 
 static vector<double> _PC_frame_start(c_maxCamerasToUse, 0.0);
 static vector<double> _PC_frame_stop(c_maxCamerasToUse, 0.0);
-static vector<vector<double>> _PC_frame_time_table(c_maxCamerasToUse, std::vector<double>(c_countOfImagesToGrab));
+static vector<int> _PC_frame_count(c_maxCamerasToUse, 0);
+
+static vector<vector<double>> _PC_frame_time_table(c_maxCamerasToUse, vector<double>(c_countOfImagesToGrab,0.0));
 
 static char IsBurstStarted = 0;
+static int c_FrameSetTriggered = -1;
 
 class CSampleImageEventHandler : public CBaslerUsbImageEventHandler //CImageEventHandler //CBaslerUsbImageEventHandler
 {
@@ -67,23 +70,51 @@ public:
 		if (PayloadType_ChunkData != ptrGrabResult->GetPayloadType()) throw RUNTIME_EXCEPTION("Unexpected payload type received.");
 
 
-		if (IsReadable(ptrGrabResult->ChunkTimestamp))
-			_CurrTimestamp[cameraContextValue] = ptrGrabResult->ChunkTimestamp.GetValue();
-			//_PC_frame_time_table[][]  = ptrGrabResult->ChunkTimestamp.GetValue();
+		if (_PC_frame_count[cameraContextValue] < c_countOfImagesToGrab)
+		{
+			//if (IsReadable(ptrGrabResult->ChunkTimestamp))
+			//{
+				int _frame_index = _PC_frame_count[cameraContextValue];
+				_PC_frame_time_table[cameraContextValue][_frame_index] = _PC_frame_stop[cameraContextValue];// (double)clock() / CLOCKS_PER_SEC;
+				//ptrGrabResult->ChunkTimestamp.GetValue();
+			//}
+			//cout << "Camera " << cameraContextValue << ": " << _PC_frame_stop[cameraContextValue] << " frmNm: " << _PC_frame_count[cameraContextValue] << " frmTime: " << _PC_frame_time_table[cameraContextValue][_PC_frame_count[cameraContextValue]] << endl;
+
+			_PC_frame_count[cameraContextValue] += 1;
+
+			
+			_PrevTimestamp[cameraContextValue] = _CurrTimestamp[cameraContextValue];
+
+			camera.ExecuteSoftwareTrigger();
+			_PC_frame_start[cameraContextValue] = (double)clock() / CLOCKS_PER_SEC;
+
+		}
+
+
+//		cout << "Camera " << cameraContextValue << ": " << _PC_frame_stop[cameraContextValue] << " frmNm: " << _PC_frame_count[cameraContextValue] << " frmTime: " << _PC_frame_time_table[cameraContextValue][_PC_frame_count[cameraContextValue]] << endl;
+
 
 		//cout << "Camera " << cameraContextValue << ": " << camera.GetDeviceInfo().GetModelName() << (_CurrTimestamp[cameraContextValue] - _PrevTimestamp[cameraContextValue]) << endl;
 
 		//cout << "Camera " << cameraContextValue << ": " << camera.GetDeviceInfo().GetModelName() << "fstart: " << _PC_frame_start[cameraContextValue] << "fstop: "<<_PC_frame_stop[cameraContextValue]<< endl;
 
-		cout << "Camera " << cameraContextValue << ": " << _PC_frame_stop[cameraContextValue] << endl;
-
-		_PrevTimestamp[cameraContextValue] = _CurrTimestamp[cameraContextValue];
-
-		camera.ExecuteSoftwareTrigger();
-		_PC_frame_start[cameraContextValue] = (double)clock() / CLOCKS_PER_SEC;
+	
 		
 	}
 };
+
+void PrintTimeTable()
+{
+	for (size_t i = 0; i < c_countOfImagesToGrab; ++i)
+	{
+		cout << "Camera";
+		for (size_t j = 0; j < c_maxCamerasToUse; ++j)
+		{
+			cout << " " << j << ": " << _PC_frame_time_table[j][i];
+		}
+		cout << endl;
+	}
+}
 
 
 int main(int argc, char* argv[])
@@ -149,13 +180,15 @@ int main(int argc, char* argv[])
 		//cameras.StartGrabbing(10, GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
 		for (size_t i = 0; i < cameras.GetSize(); ++i)
 		{
-			cameras[i].StartGrabbing(21, GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
+			cameras[i].StartGrabbing(c_countOfImagesToGrab + 2, GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
 		}
         
 
 		cerr << endl << "Enter \"t\" to trigger the camera or \"e\" to exit and press enter? (t/e)" << endl << endl;
 
 		char key;
+
+		
 
 		do
 		{
@@ -171,6 +204,7 @@ int main(int argc, char* argv[])
 						{
 							_PC_frame_start[i] = (double)clock() / CLOCKS_PER_SEC;
 							cameras[i].ExecuteSoftwareTrigger();
+							c_FrameSetTriggered++;
 						}
 					}
 				}
@@ -182,10 +216,14 @@ int main(int argc, char* argv[])
 				{
 					_PC_frame_start[i] = (double)clock() / CLOCKS_PER_SEC;
 					cameras[i].ExecuteSoftwareTrigger();
+					c_FrameSetTriggered++;
 				}
 			}
 
-		} while ((key != 'e') && (key != 'E'));
+			
+
+
+		} while (((key != 'e') && (key != 'E')) || (c_FrameSetTriggered < c_countOfImagesToGrab));
 
 
 
@@ -197,6 +235,8 @@ int main(int argc, char* argv[])
         << e.GetDescription() << endl;
         exitCode = 1;
     }
+
+	PrintTimeTable();
 
     // Comment the following two lines to disable waiting on exit.
     cerr << endl << "Press Enter to exit." << endl;
