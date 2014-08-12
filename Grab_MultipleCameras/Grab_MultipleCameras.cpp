@@ -1,15 +1,15 @@
 // Grab_MultipleCameras.cpp
 /*
-   This sample illustrates how to grab and process images from multiple cameras
-   using the CInstantCameraArray class. The CInstantCameraArray class represents
-   an array of instant camera objects. It provides almost the same interface
-   as the instant camera for grabbing.
-   The main purpose of the CInstantCameraArray is to simplify waiting for images and
-   camera events of multiple cameras in one thread. This is done by providing a single
-   RetrieveResult method for all cameras in the array.
-   Alternatively, the grabbing can be started using the internal grab loop threads
-   of all cameras in the CInstantCameraArray. The grabbed images can then be processed by one or more
-   image event handlers. Please note that this is not shown in this example.
+This sample illustrates how to grab and process images from multiple cameras
+using the CInstantCameraArray class. The CInstantCameraArray class represents
+an array of instant camera objects. It provides almost the same interface
+as the instant camera for grabbing.
+The main purpose of the CInstantCameraArray is to simplify waiting for images and
+camera events of multiple cameras in one thread. This is done by providing a single
+RetrieveResult method for all cameras in the array.
+Alternatively, the grabbing can be started using the internal grab loop threads
+of all cameras in the CInstantCameraArray. The grabbed images can then be processed by one or more
+image event handlers. Please note that this is not shown in this example.
 */
 
 // Include files to use the PYLON API.
@@ -42,7 +42,7 @@ using namespace Pylon;
 using namespace std;
 
 // Number of images to be grabbed.
-static const uint32_t c_countOfImagesToGrab = 10;
+static const uint32_t c_countOfImagesToGrab = 20;
 static const size_t c_maxCamerasToUse = 2;
 
 static vector<int64_t> _CurrTimestamp(c_maxCamerasToUse, 0);
@@ -50,22 +50,18 @@ static vector<int64_t> _PrevTimestamp(c_maxCamerasToUse, 0);
 
 static vector<double> _PC_frame_start(c_maxCamerasToUse, 0.0);
 static vector<double> _PC_frame_stop(c_maxCamerasToUse, 0.0);
-<<<<<<< HEAD
 static vector<int> _PC_frame_count(c_maxCamerasToUse, 0);
 
-static vector<vector<double>> _PC_frame_time_table(c_maxCamerasToUse, vector<double>(c_countOfImagesToGrab,0.0));
+static vector<vector<double>> _PC_frame_time_table(c_maxCamerasToUse*2, vector<double>(c_countOfImagesToGrab + 3, 0.0));
 
 static char IsBurstStarted = 0;
 static int c_FrameSetTriggered = -1;
-=======
-
->>>>>>> parent of 652c777... Cameras in trigger mode
 
 class CSampleImageEventHandler : public CBaslerUsbImageEventHandler //CImageEventHandler //CBaslerUsbImageEventHandler
 {
 public:
 	virtual void OnImageGrabbed(CBaslerUsbInstantCamera& camera, const CBaslerUsbGrabResultPtr& ptrGrabResult)
-	//virtual void OnImageGrabbed(CInstantCamera& camera, const CGrabResultPtr& ptrGrabResult)
+		//virtual void OnImageGrabbed(CInstantCamera& camera, const CGrabResultPtr& ptrGrabResult)
 	{
 		intptr_t cameraContextValue = ptrGrabResult->GetCameraContext();
 		_PC_frame_stop[cameraContextValue] = (double)clock() / CLOCKS_PER_SEC;
@@ -74,24 +70,22 @@ public:
 		if (PayloadType_ChunkData != ptrGrabResult->GetPayloadType()) throw RUNTIME_EXCEPTION("Unexpected payload type received.");
 
 
-<<<<<<< HEAD
 		if (_PC_frame_count[cameraContextValue] < c_countOfImagesToGrab)
 		{
 			//if (IsReadable(ptrGrabResult->ChunkTimestamp))
 			//{
-				int _frame_index = _PC_frame_count[cameraContextValue];
-				_PC_frame_time_table[cameraContextValue][_frame_index] = _PC_frame_stop[cameraContextValue];// (double)clock() / CLOCKS_PER_SEC;
-				//ptrGrabResult->ChunkTimestamp.GetValue();
-			//}
+			int _frame_index = _PC_frame_count[cameraContextValue];
+			_PC_frame_time_table[cameraContextValue][_frame_index] = _PC_frame_stop[cameraContextValue];// (double)clock() / CLOCKS_PER_SEC;
+			
+			if (IsReadable(ptrGrabResult->ChunkTimestamp))
+			{
+				_PC_frame_time_table[cameraContextValue+2][_frame_index] = 0.000000001*(double)ptrGrabResult->ChunkTimestamp.GetValue();
+			}
 			//cout << "Camera " << cameraContextValue << ": " << _PC_frame_stop[cameraContextValue] << " frmNm: " << _PC_frame_count[cameraContextValue] << " frmTime: " << _PC_frame_time_table[cameraContextValue][_PC_frame_count[cameraContextValue]] << endl;
-=======
-		if (IsReadable(ptrGrabResult->ChunkTimestamp))
-			_CurrTimestamp[cameraContextValue] = ptrGrabResult->ChunkTimestamp.GetValue();
->>>>>>> parent of 652c777... Cameras in trigger mode
 
 			_PC_frame_count[cameraContextValue] += 1;
 
-			
+
 			_PrevTimestamp[cameraContextValue] = _CurrTimestamp[cameraContextValue];
 
 			camera.ExecuteSoftwareTrigger();
@@ -99,23 +93,16 @@ public:
 
 		}
 
-<<<<<<< HEAD
 
-//		cout << "Camera " << cameraContextValue << ": " << _PC_frame_stop[cameraContextValue] << " frmNm: " << _PC_frame_count[cameraContextValue] << " frmTime: " << _PC_frame_time_table[cameraContextValue][_PC_frame_count[cameraContextValue]] << endl;
+		//		cout << "Camera " << cameraContextValue << ": " << _PC_frame_stop[cameraContextValue] << " frmNm: " << _PC_frame_count[cameraContextValue] << " frmTime: " << _PC_frame_time_table[cameraContextValue][_PC_frame_count[cameraContextValue]] << endl;
 
 
 		//cout << "Camera " << cameraContextValue << ": " << camera.GetDeviceInfo().GetModelName() << (_CurrTimestamp[cameraContextValue] - _PrevTimestamp[cameraContextValue]) << endl;
 
 		//cout << "Camera " << cameraContextValue << ": " << camera.GetDeviceInfo().GetModelName() << "fstart: " << _PC_frame_start[cameraContextValue] << "fstop: "<<_PC_frame_stop[cameraContextValue]<< endl;
 
-	
-=======
-		cout << "Camera " << cameraContextValue << ": " << camera.GetDeviceInfo().GetModelName() << "fstart: " << _PC_frame_start[cameraContextValue] << "fstop: "<<_PC_frame_stop[cameraContextValue]<< endl;
 
 
-		_PrevTimestamp[cameraContextValue] = _CurrTimestamp[cameraContextValue];
->>>>>>> parent of 652c777... Cameras in trigger mode
-		
 	}
 };
 
@@ -124,9 +111,12 @@ void PrintTimeTable()
 	for (size_t i = 0; i < c_countOfImagesToGrab; ++i)
 	{
 		cout << "Camera";
+		//for (size_t j = 0; j < c_maxCamerasToUse; ++j)
 		for (size_t j = 0; j < c_maxCamerasToUse; ++j)
 		{
-			cout << " " << j << ": " << _PC_frame_time_table[j][i];
+			//cout << " #" << j << ": " << _PC_frame_time_table[j][i] << " Cam Time:" << _PC_frame_time_table[j+2][i];
+			cout << " #" << j << ": " << _PC_frame_time_table[j][i + 1] - _PC_frame_time_table[j][i] << " Cam Time:" << _PC_frame_time_table[j + 2][i + 1] - _PC_frame_time_table[j + 2][i];
+
 		}
 		cout << endl;
 	}
@@ -135,33 +125,33 @@ void PrintTimeTable()
 
 int main(int argc, char* argv[])
 {
-    // The exit code of the sample application.
-    int exitCode = 0;
+	// The exit code of the sample application.
+	int exitCode = 0;
 
 	Pylon::PylonAutoInitTerm autoInitTerm;
 
-    try
-    {
+	try
+	{
 
 		CDeviceInfo info;
 		info.SetDeviceClass(Camera_t::DeviceClass());
 
-        // Get the transport layer factory.
-        CTlFactory& tlFactory = CTlFactory::GetInstance();
+		// Get the transport layer factory.
+		CTlFactory& tlFactory = CTlFactory::GetInstance();
 
-        // Get all attached devices and exit application if no device is found.
-        DeviceInfoList_t devices;
-        if ( tlFactory.EnumerateDevices(devices) == 0 )
-        {
-            throw RUNTIME_EXCEPTION( "No camera present.");
-        }
+		// Get all attached devices and exit application if no device is found.
+		DeviceInfoList_t devices;
+		if (tlFactory.EnumerateDevices(devices) == 0)
+		{
+			throw RUNTIME_EXCEPTION("No camera present.");
+		}
 		CBaslerUsbInstantCameraArray cameras(min(devices.size(), c_maxCamerasToUse));
 
-        // Create and attach all Pylon Devices.
-        for ( size_t i = 0; i < cameras.GetSize(); ++i)
-        {
-            cameras[ i ].Attach( tlFactory.CreateDevice( devices[ i ]));
-			
+		// Create and attach all Pylon Devices.
+		for (size_t i = 0; i < cameras.GetSize(); ++i)
+		{
+			cameras[i].Attach(tlFactory.CreateDevice(devices[i]));
+
 			cameras[i].RegisterConfiguration(new CSoftwareTriggerConfiguration, RegistrationMode_ReplaceAll, Cleanup_Delete);
 			cameras[i].RegisterConfiguration(new CConfigurationEventPrinter, RegistrationMode_Append, Cleanup_Delete);
 
@@ -174,8 +164,8 @@ int main(int argc, char* argv[])
 
 			cameras[i].Gain.SetValue(0);
 			cameras[i].ExposureTime.SetValue(50000);
-            // Print the model name of the camera.
-            cout << "Using device " << cameras[ i ].GetDeviceInfo().GetModelName() << endl;
+			// Print the model name of the camera.
+			cout << "Using device " << cameras[i].GetDeviceInfo().GetModelName() << endl;
 
 
 			if (GenApi::IsWritable(cameras[i].ChunkModeActive))
@@ -191,138 +181,77 @@ int main(int argc, char* argv[])
 			cameras[i].ChunkSelector.SetValue(ChunkSelector_Timestamp);
 			cameras[i].ChunkEnable.SetValue(true);
 
-        }
+		}
 
-<<<<<<< HEAD
 		//cameras.StartGrabbing(10, GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
 		for (size_t i = 0; i < cameras.GetSize(); ++i)
 		{
 			cameras[i].StartGrabbing(c_countOfImagesToGrab + 2, GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
 		}
-        
-=======
-        // Starts grabbing for all cameras starting with index 0. The grabbing
-        // is started for one camera after the other. That's why the images of all
-        // cameras are not taken at the same time.
-        // However, a hardware trigger setup can be used to cause all cameras to grab images synchronously.
-        // According to their default configuration, the cameras are
-        // set up for free-running continuous acquisition.
-		cameras.StartGrabbing(GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
 
-        // This smart pointer will receive the grab result data.
-		//CBaslerUsbGrabResultPtr ptrGrabResult;
-		//camera.StartGrabbing(GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
->>>>>>> parent of 652c777... Cameras in trigger mode
 
 		cerr << endl << "Enter \"t\" to trigger the camera or \"e\" to exit and press enter? (t/e)" << endl << endl;
 
-		// Wait for user input to trigger the camera or exit the program.
-		// The grabbing is stopped, the device is closed and destroyed automatically when the camera object goes out of scope.
 		char key;
-<<<<<<< HEAD
 
-		
+
 
 		do
 		{
-			//if (IsBurstStarted == 0)
-=======
-		do
-		{
-			cin.get(key);
-			if ((key == 't' || key == 'T'))
->>>>>>> parent of 652c777... Cameras in trigger mode
+			if (IsBurstStarted == 0)
 			{
-				for (size_t i = 0; i < cameras.GetSize(); ++i)
+				cin.get(key);
+			}
+			else key = 't';
+
+				if ((key == 't' || key == 'T'))
 				{
-					// Execute the software trigger. Wait up to 100 ms for the camera to be ready for trigger.
-					if (cameras[i].WaitForFrameTriggerReady(100, TimeoutHandling_ThrowException))
+					for (size_t i = 0; i < cameras.GetSize(); ++i)
 					{
-<<<<<<< HEAD
 						// Execute the software trigger. Wait up to 100 ms for the camera to be ready for trigger.
-						/*if (cameras[i].WaitForFrameTriggerReady(100, TimeoutHandling_ThrowException))
+						if (cameras[i].WaitForFrameTriggerReady(300, TimeoutHandling_ThrowException))
 						{
 							_PC_frame_start[i] = (double)clock() / CLOCKS_PER_SEC;
 							cameras[i].ExecuteSoftwareTrigger();
 							c_FrameSetTriggered++;
 						}
-						*/
-						if (cameras[i].WaitForFrameTriggerReady(300, TimeoutHandling_ThrowException))
-						{
-							cout << " cam: " << i << " wait cnt" << c_FrameSetTriggered << endl;
-							c_FrameSetTriggered++;
-							continue; 	
-						}
-=======
-						_PC_frame_start[i] = (double)clock() / CLOCKS_PER_SEC;
-						cameras[i].ExecuteSoftwareTrigger();
->>>>>>> parent of 652c777... Cameras in trigger mode
 					}
-
-					for (size_t i = 0; i < cameras.GetSize(); ++i)
-					{
-						_PC_frame_start[i] = (double)clock() / CLOCKS_PER_SEC;
-						cout << " cam: " << i << " trigger cnt" << c_FrameSetTriggered << " time " << _PC_frame_start[i] << endl;
-
-						cameras[i].ExecuteSoftwareTrigger();
-					}
+					IsBurstStarted = 1;
 				}
-			}
-<<<<<<< HEAD
-			/*else
+				
+			
+			//else
 			{
-				for (size_t i = 0; i < cameras.GetSize(); ++i)
+				/*for (size_t i = 0; i < cameras.GetSize(); ++i)
 				{
+					//cout << "Trigger run " << endl;
 					_PC_frame_start[i] = (double)clock() / CLOCKS_PER_SEC;
 					cameras[i].ExecuteSoftwareTrigger();
 					c_FrameSetTriggered++;
-				}
+				}*/
 			}
 
-			*/
+
 
 
 		} while (((key != 'e') && (key != 'E')) || (c_FrameSetTriggered < c_countOfImagesToGrab));
-=======
-		} while ((key != 'e') && (key != 'E'));
->>>>>>> parent of 652c777... Cameras in trigger mode
 
 
-        // Grab c_countOfImagesToGrab from the cameras.
-		/*
-		for( int i = 0; i < c_countOfImagesToGrab && cameras.IsGrabbing(); ++i)
-        {
-            cameras.RetrieveResult( 5000, ptrGrabResult, TimeoutHandling_ThrowException);
-            intptr_t cameraContextValue = ptrGrabResult->GetCameraContext();
-            //Pylon::DisplayImage(cameraContextValue, ptrGrabResult);
 
-			if (PayloadType_ChunkData != ptrGrabResult->GetPayloadType()) throw RUNTIME_EXCEPTION("Unexpected payload type received.");
-			
-
-			if (IsReadable(ptrGrabResult->ChunkTimestamp))
-				_CurrTimestamp[cameraContextValue] = ptrGrabResult->ChunkTimestamp.GetValue();
-			
-
-			cout << "Camera " << cameraContextValue << ": " << cameras[cameraContextValue].GetDeviceInfo().GetModelName() << (_CurrTimestamp[cameraContextValue] - _PrevTimestamp[cameraContextValue]) << endl;
-			_PrevTimestamp[cameraContextValue] = _CurrTimestamp[cameraContextValue];
-			
-		}
-		*/
-
-    }
-    catch (GenICam::GenericException &e)
-    {
-        // Error handling
-        cerr << "An exception occurred." << endl
-        << e.GetDescription() << endl;
-        exitCode = 1;
-    }
+	}
+	catch (GenICam::GenericException &e)
+	{
+		// Error handling
+		cerr << "An exception occurred." << endl
+			<< e.GetDescription() << endl;
+		exitCode = 1;
+	}
 
 	PrintTimeTable();
 
-    // Comment the following two lines to disable waiting on exit.
-    cerr << endl << "Press Enter to exit." << endl;
-    while( cin.get() != '\n');
+	// Comment the following two lines to disable waiting on exit.
+	cerr << endl << "Press Enter to exit." << endl;
+	while (cin.get() != '\n');
 
-    return exitCode;
+	return exitCode;
 }
