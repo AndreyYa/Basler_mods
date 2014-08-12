@@ -42,7 +42,7 @@ using namespace Pylon;
 using namespace std;
 
 // Number of images to be grabbed.
-static const uint32_t c_countOfImagesToGrab = 20;
+static const uint32_t c_countOfImagesToGrab = 10;
 static const size_t c_maxCamerasToUse = 2;
 
 static vector<int64_t> _CurrTimestamp(c_maxCamerasToUse, 0);
@@ -192,7 +192,7 @@ int main(int argc, char* argv[])
 
 		do
 		{
-			if (IsBurstStarted == 0)
+			//if (IsBurstStarted == 0)
 			{
 				cin.get(key);
 				if ((key == 't' || key == 'T'))
@@ -200,17 +200,32 @@ int main(int argc, char* argv[])
 					for (size_t i = 0; i < cameras.GetSize(); ++i)
 					{
 						// Execute the software trigger. Wait up to 100 ms for the camera to be ready for trigger.
-						if (cameras[i].WaitForFrameTriggerReady(100, TimeoutHandling_ThrowException))
+						/*if (cameras[i].WaitForFrameTriggerReady(100, TimeoutHandling_ThrowException))
 						{
 							_PC_frame_start[i] = (double)clock() / CLOCKS_PER_SEC;
 							cameras[i].ExecuteSoftwareTrigger();
 							c_FrameSetTriggered++;
 						}
+						*/
+						if (cameras[i].WaitForFrameTriggerReady(300, TimeoutHandling_ThrowException))
+						{
+							cout << " cam: " << i << " wait cnt" << c_FrameSetTriggered << endl;
+							c_FrameSetTriggered++;
+							continue; 	
+						}
+					}
+
+					for (size_t i = 0; i < cameras.GetSize(); ++i)
+					{
+						_PC_frame_start[i] = (double)clock() / CLOCKS_PER_SEC;
+						cout << " cam: " << i << " trigger cnt" << c_FrameSetTriggered << " time " << _PC_frame_start[i] << endl;
+
+						cameras[i].ExecuteSoftwareTrigger();
 					}
 				}
 				IsBurstStarted = 1;
 			}
-			else
+			/*else
 			{
 				for (size_t i = 0; i < cameras.GetSize(); ++i)
 				{
@@ -220,7 +235,7 @@ int main(int argc, char* argv[])
 				}
 			}
 
-			
+			*/
 
 
 		} while (((key != 'e') && (key != 'E')) || (c_FrameSetTriggered < c_countOfImagesToGrab));
