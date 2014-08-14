@@ -9,7 +9,7 @@ typedef CBaslerUsbCamera Camera_t;
 
 void ProcessImage(unsigned char* pImage, int imageSizeX, int imageSizeY)
 {
-	cout << "Camera: x" << imageSizeX << " Y: " << imageSizeY << endl;
+	//cout << "Camera: x" << imageSizeX << " Y: " << imageSizeY << endl;
 
 	// Do something with the image data
 }
@@ -22,6 +22,7 @@ struct MyContext
 int main()
 {
 	PylonAutoInitTerm autoInitTerm;
+	const int numGrabs = 30;
 
 	try
 	{
@@ -52,9 +53,14 @@ int main()
 		Camera.Height.SetValue(Camera.Height.GetMax());
 
 		// Continuous mode, no external trigger used
-		Camera.TriggerSelector.SetValue(TriggerSelector_FrameStart);
-		Camera.TriggerMode.SetValue(TriggerMode_Off);
+		Camera.TriggerSelector.SetValue(TriggerSelector_FrameBurstStart);
+		Camera.TriggerMode.SetValue(TriggerMode_On);
+		Camera.TriggerSource.SetValue(TriggerSource_Software);
+
+		
 		Camera.AcquisitionMode.SetValue(AcquisitionMode_Continuous);
+		Camera.AcquisitionBurstFrameCount.SetValue(numGrabs);
+
 
 		// Configure exposure time and mode
 		Camera.ExposureMode.SetValue(ExposureMode_Timed);
@@ -70,12 +76,27 @@ int main()
 			CBaslerUsbCamera::StreamGrabber_t StreamGrabber(Camera.GetStreamGrabber(0));
 			StreamGrabber.Open();
 
+			if (GenApi::IsWritable(Camera.ChunkModeActive)) {
+				Camera.ChunkModeActive.SetValue(true);
+			}
+			else {
+				cerr << "The camera does not support chunk features" << endl;
+				return 1;
+			}
+			Camera.ChunkSelector.SetValue(ChunkSelector_Timestamp);
+			Camera.ChunkEnable.SetValue(true);
+			// Create ChunkParser
+			IChunkParser &ChunkParser = *Camera.CreateChunkParser();
+
+
 			// Parameterize the stream grabber
 			const int bufferSize = (int)Camera.PayloadSize();
 			const int numBuffers = 10;
 			StreamGrabber.MaxBufferSize = bufferSize;
 			StreamGrabber.MaxNumBuffer = numBuffers;
 			StreamGrabber.PrepareGrab();
+
+
 
 			// Allocate and register image buffers, put them into the
 			// grabber's input queue
@@ -93,10 +114,16 @@ int main()
 			Camera.AcquisitionStart.Execute();
 
 			// Grab and process 100 images
-			const int numGrabs = 5;
+			
 			GrabResult Result;
+			int64_t PrevTime = 0;
+			int64_t CurrTime = 0;
+
+			Camera.TriggerSoftware.Execute();
+
 			for (int i = 0; i < numGrabs; ++i) {
 				// Wait for the grabbed image with a timeout of 3 seconds
+				
 				if (StreamGrabber.GetWaitObject().Wait(3000)) {
 					// Get an item from the grabber's output queue
 					if (!StreamGrabber.RetrieveResult(Result)) {
@@ -105,6 +132,14 @@ int main()
 					}
 					if (Result.Succeeded()) {
 						// Grabbing was successful. Process the image.
+						ChunkParser.AttachBuffer(Result.Buffer(), Result.GetPayloadSize());
+
+						if (IsReadable(Camera.ChunkTimestamp))
+						{
+							CurrTime = Camera.ChunkTimestamp.GetValue();
+							cout << "TimeStamp : " << (CurrTime*0.000000001) << " dT:" << ((CurrTime - PrevTime)*0.000000001) << endl;
+							PrevTime = CurrTime;
+						}
 						ProcessImage((unsigned char*)Result.Buffer(), Result.GetSizeX(), Result.GetSizeY());
 					}
 					else {
