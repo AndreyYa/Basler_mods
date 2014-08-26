@@ -52,7 +52,7 @@ static vector<double> _PC_frame_start(c_maxCamerasToUse, 0.0);
 static vector<double> _PC_frame_stop(c_maxCamerasToUse, 0.0);
 static vector<int> _PC_frame_count(c_maxCamerasToUse, 0);
 
-static vector<vector<double>> _PC_frame_time_table(c_maxCamerasToUse*2, vector<double>(c_countOfImagesToGrab + 3, 0.0));
+static vector<vector<double>> _PC_frame_time_table(c_maxCamerasToUse*2, vector<double>(c_countOfImagesToGrab, 0.0));
 
 static char IsBurstStarted = 0;
 static int c_FrameSetTriggered = -1;
@@ -61,7 +61,6 @@ class CSampleImageEventHandler : public CBaslerUsbImageEventHandler //CImageEven
 {
 public:
 	virtual void OnImageGrabbed(CBaslerUsbInstantCamera& camera, const CBaslerUsbGrabResultPtr& ptrGrabResult)
-		//virtual void OnImageGrabbed(CInstantCamera& camera, const CGrabResultPtr& ptrGrabResult)
 	{
 		intptr_t cameraContextValue = ptrGrabResult->GetCameraContext();
 		_PC_frame_stop[cameraContextValue] = (double)clock() / CLOCKS_PER_SEC;
@@ -72,50 +71,34 @@ public:
 
 		if (_PC_frame_count[cameraContextValue] < c_countOfImagesToGrab)
 		{
-			//if (IsReadable(ptrGrabResult->ChunkTimestamp))
-			//{
+			
 			int _frame_index = _PC_frame_count[cameraContextValue];
-			_PC_frame_time_table[cameraContextValue][_frame_index] = _PC_frame_stop[cameraContextValue];// (double)clock() / CLOCKS_PER_SEC;
+			_PC_frame_time_table[2*cameraContextValue][_frame_index] = _PC_frame_stop[cameraContextValue];// (double)clock() / CLOCKS_PER_SEC;
 			
 			if (IsReadable(ptrGrabResult->ChunkTimestamp))
 			{
-				_PC_frame_time_table[cameraContextValue+2][_frame_index] = 0.000000001*(double)ptrGrabResult->ChunkTimestamp.GetValue();
+				_PC_frame_time_table[2*cameraContextValue+1][_frame_index] = 0.000000001*(double)ptrGrabResult->ChunkTimestamp.GetValue();
 			}
-			//cout << "Camera " << cameraContextValue << ": " << _PC_frame_stop[cameraContextValue] << " frmNm: " << _PC_frame_count[cameraContextValue] << " frmTime: " << _PC_frame_time_table[cameraContextValue][_PC_frame_count[cameraContextValue]] << endl;
 
 			_PC_frame_count[cameraContextValue] += 1;
-
-
 			_PrevTimestamp[cameraContextValue] = _CurrTimestamp[cameraContextValue];
 
-			camera.ExecuteSoftwareTrigger();
+			//camera.ExecuteSoftwareTrigger();
 			_PC_frame_start[cameraContextValue] = (double)clock() / CLOCKS_PER_SEC;
 
 		}
-
-
-		//		cout << "Camera " << cameraContextValue << ": " << _PC_frame_stop[cameraContextValue] << " frmNm: " << _PC_frame_count[cameraContextValue] << " frmTime: " << _PC_frame_time_table[cameraContextValue][_PC_frame_count[cameraContextValue]] << endl;
-
-
-		//cout << "Camera " << cameraContextValue << ": " << camera.GetDeviceInfo().GetModelName() << (_CurrTimestamp[cameraContextValue] - _PrevTimestamp[cameraContextValue]) << endl;
-
-		//cout << "Camera " << cameraContextValue << ": " << camera.GetDeviceInfo().GetModelName() << "fstart: " << _PC_frame_start[cameraContextValue] << "fstop: "<<_PC_frame_stop[cameraContextValue]<< endl;
-
-
-
 	}
 };
 
 void PrintTimeTable()
 {
-	for (size_t i = 0; i < c_countOfImagesToGrab; ++i)
+	for (size_t i = 0; i < c_countOfImagesToGrab - 1; ++i)
 	{
 		cout << "Camera";
 		//for (size_t j = 0; j < c_maxCamerasToUse; ++j)
 		for (size_t j = 0; j < c_maxCamerasToUse; ++j)
 		{
-			//cout << " #" << j << ": " << _PC_frame_time_table[j][i] << " Cam Time:" << _PC_frame_time_table[j+2][i];
-			cout << " #" << j << ": " << _PC_frame_time_table[j][i + 1] - _PC_frame_time_table[j][i] << " Cam Time:" << _PC_frame_time_table[j + 2][i + 1] - _PC_frame_time_table[j + 2][i];
+			cout << " #" << j << ": " << _PC_frame_time_table[2*j][i + 1] - _PC_frame_time_table[2*j][i] << " Cam Time:" << _PC_frame_time_table[2*j + 1][i + 1] - _PC_frame_time_table[2*j + 1][i];
 
 		}
 		cout << endl;
@@ -147,20 +130,31 @@ int main(int argc, char* argv[])
 		}
 		CBaslerUsbInstantCameraArray cameras(min(devices.size(), c_maxCamerasToUse));
 
+		int CamNmbr = devices.size();
+
 		// Create and attach all Pylon Devices.
-		for (size_t i = 0; i < cameras.GetSize(); ++i)
+		for (size_t i = 0; i < CamNmbr; ++i)
 		{
 			cameras[i].Attach(tlFactory.CreateDevice(devices[i]));
 
 			cameras[i].RegisterConfiguration(new CSoftwareTriggerConfiguration, RegistrationMode_ReplaceAll, Cleanup_Delete);
 			cameras[i].RegisterConfiguration(new CConfigurationEventPrinter, RegistrationMode_Append, Cleanup_Delete);
 
-			//cameras[i].RegisterImageEventHandler(new CImageEventPrinter, RegistrationMode_Append, Cleanup_Delete);
 			cameras[i].RegisterImageEventHandler(new CSampleImageEventHandler, RegistrationMode_Append, Cleanup_Delete);
+
+			cameras[i].MaxNumBuffer = c_countOfImagesToGrab;
 
 			cameras[i].Open();
 
 			//cameras[i].PixelFormat.SetValue(PixelFormat_Mono12);
+
+			/*cameras[i].TriggerSelector.SetValue(TriggerSelector_FrameStart);
+			cameras[i].TriggerMode.SetValue(TriggerMode_On);
+			cameras[i].TriggerSource.SetValue(TriggerSource_Software);
+
+			cameras[i].AcquisitionMode.SetValue(AcquisitionMode_Continuous);
+			cameras[i].AcquisitionBurstFrameCount.SetValue(c_countOfImagesToGrab);*/
+
 
 			cameras[i].Gain.SetValue(0);
 			cameras[i].ExposureTime.SetValue(50000);
@@ -186,7 +180,8 @@ int main(int argc, char* argv[])
 		//cameras.StartGrabbing(10, GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
 		for (size_t i = 0; i < cameras.GetSize(); ++i)
 		{
-			cameras[i].StartGrabbing(c_countOfImagesToGrab + 2, GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
+			cameras[i].StartGrabbing(c_countOfImagesToGrab, GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
+			//cameras[i].StartGrabbing(GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
 		}
 
 
@@ -198,38 +193,25 @@ int main(int argc, char* argv[])
 
 		do
 		{
-			if (IsBurstStarted == 0)
+			
+			cin.get(key);
+			
+			if ((key == 't' || key == 'T'))
 			{
-				cin.get(key);
-			}
-			else key = 't';
-
-				if ((key == 't' || key == 'T'))
+				for (size_t i = 0; i < cameras.GetSize(); ++i)
 				{
-					for (size_t i = 0; i < cameras.GetSize(); ++i)
+					// Execute the software trigger. Wait up to 100 ms for the camera to be ready for trigger.
+					if (cameras[i].WaitForFrameTriggerReady(3000, TimeoutHandling_ThrowException))
 					{
-						// Execute the software trigger. Wait up to 100 ms for the camera to be ready for trigger.
-						if (cameras[i].WaitForFrameTriggerReady(300, TimeoutHandling_ThrowException))
-						{
-							_PC_frame_start[i] = (double)clock() / CLOCKS_PER_SEC;
-							cameras[i].ExecuteSoftwareTrigger();
-							c_FrameSetTriggered++;
-						}
+						_PC_frame_start[i] = (double)clock() / CLOCKS_PER_SEC;
+						cameras[i].ExecuteSoftwareTrigger();
+						//c_FrameSetTriggered++;
 					}
-					IsBurstStarted = 1;
 				}
+				//IsBurstStarted = 1;
+			}
 				
 			
-			//else
-			{
-				/*for (size_t i = 0; i < cameras.GetSize(); ++i)
-				{
-					//cout << "Trigger run " << endl;
-					_PC_frame_start[i] = (double)clock() / CLOCKS_PER_SEC;
-					cameras[i].ExecuteSoftwareTrigger();
-					c_FrameSetTriggered++;
-				}*/
-			}
 
 
 
