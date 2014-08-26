@@ -43,7 +43,7 @@ using namespace std;
 
 // Number of images to be grabbed.
 static const uint32_t c_countOfImagesToGrab = 20;
-static const size_t c_maxCamerasToUse = 2;
+static const size_t c_maxCamerasToUse = 1;
 
 static vector<int64_t> _CurrTimestamp(c_maxCamerasToUse, 0);
 static vector<int64_t> _PrevTimestamp(c_maxCamerasToUse, 0);
@@ -137,23 +137,25 @@ int main(int argc, char* argv[])
 		{
 			cameras[i].Attach(tlFactory.CreateDevice(devices[i]));
 
-			cameras[i].RegisterConfiguration(new CSoftwareTriggerConfiguration, RegistrationMode_ReplaceAll, Cleanup_Delete);
-			cameras[i].RegisterConfiguration(new CConfigurationEventPrinter, RegistrationMode_Append, Cleanup_Delete);
+			//cameras[i].RegisterConfiguration(new CSoftwareTriggerConfiguration, RegistrationMode_ReplaceAll, Cleanup_Delete);
+			//cameras[i].RegisterConfiguration(new CConfigurationEventPrinter, RegistrationMode_Append, Cleanup_Delete);
 
-			cameras[i].RegisterImageEventHandler(new CSampleImageEventHandler, RegistrationMode_Append, Cleanup_Delete);
+			cameras[i].RegisterImageEventHandler(new CSampleImageEventHandler, RegistrationMode_ReplaceAll, Cleanup_Delete);
 
 			cameras[i].MaxNumBuffer = c_countOfImagesToGrab;
 
 			cameras[i].Open();
 
 			//cameras[i].PixelFormat.SetValue(PixelFormat_Mono12);
+			cameras[i].AcquisitionMode.SetValue(AcquisitionMode_Continuous);
 
-			/*cameras[i].TriggerSelector.SetValue(TriggerSelector_FrameStart);
+			cameras[i].TriggerSelector.SetValue(TriggerSelector_FrameBurstStart);
 			cameras[i].TriggerMode.SetValue(TriggerMode_On);
 			cameras[i].TriggerSource.SetValue(TriggerSource_Software);
+			cameras[i].AcquisitionBurstFrameCount.SetValue(c_countOfImagesToGrab);
 
-			cameras[i].AcquisitionMode.SetValue(AcquisitionMode_Continuous);
-			cameras[i].AcquisitionBurstFrameCount.SetValue(c_countOfImagesToGrab);*/
+			//cameras[i].AcquisitionMode.SetValue(AcquisitionMode_Continuous);
+			//cameras[i].AcquisitionBurstFrameCount.SetValue(c_countOfImagesToGrab);
 
 
 			cameras[i].Gain.SetValue(0);
@@ -180,14 +182,63 @@ int main(int argc, char* argv[])
 		//cameras.StartGrabbing(10, GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
 		for (size_t i = 0; i < cameras.GetSize(); ++i)
 		{
-			cameras[i].StartGrabbing(c_countOfImagesToGrab, GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
+			//cameras[i].StartGrabbing(c_countOfImagesToGrab, GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
 			//cameras[i].StartGrabbing(GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
+			cameras[i].AcquisitionStart.Execute();
 		}
 
+		//while (!finished)
+		//{
+		//	// Execute a trigger software command to apply a software acquisition
+		//	// start trigger signal to the camera
+		//	camera.TriggerSoftware.Execute();
+		//	// Perform the required functions to parameterize the frame start
+		//	// trigger, to trigger 5 frame starts, and to retrieve 5 frames here
+		//}
+		//camera.AcquisitionStop.Execute();
 
 		cerr << endl << "Enter \"t\" to trigger the camera or \"e\" to exit and press enter? (t/e)" << endl << endl;
 
 		char key;
+		cin.get(key);
+
+		if ((key == 't' || key == 'T'))
+		{
+			for (size_t i = 0; i < cameras.GetSize(); ++i)
+			{
+				// Execute the software trigger. Wait up to 100 ms for the camera to be ready for trigger.
+				//while(1)
+				//{
+					cameras[i].TriggerSoftware.Execute();
+				//}
+			}
+
+			for (size_t i = 0; i < cameras.GetSize(); ++i)
+			{
+				cameras[i].TriggerSelector.SetValue(TriggerSelector_FrameStart);
+				cameras[i].TriggerMode.SetValue(TriggerMode_On);
+				cameras[i].TriggerSource.SetValue(TriggerSource_Software);
+			}
+			for (size_t i = 0; i < cameras.GetSize(); ++i)
+			{
+				// Execute the software trigger. Wait up to 100 ms for the camera to be ready for trigger.
+				if (cameras[i].WaitForFrameTriggerReady(100, TimeoutHandling_ThrowException))
+				{
+					_PC_frame_start[i] = (double)clock() / CLOCKS_PER_SEC;
+					cameras[i].TriggerSoftware.Execute();
+					c_FrameSetTriggered++;
+				}
+			}
+
+
+
+			//IsBurstStarted = 1;
+		}
+
+
+
+
+
 
 
 
@@ -201,7 +252,7 @@ int main(int argc, char* argv[])
 				for (size_t i = 0; i < cameras.GetSize(); ++i)
 				{
 					// Execute the software trigger. Wait up to 100 ms for the camera to be ready for trigger.
-					if (cameras[i].WaitForFrameTriggerReady(3000, TimeoutHandling_ThrowException))
+					if (cameras[i].WaitForFrameTriggerReady(5000, TimeoutHandling_ThrowException))
 					{
 						_PC_frame_start[i] = (double)clock() / CLOCKS_PER_SEC;
 						cameras[i].ExecuteSoftwareTrigger();
@@ -216,7 +267,7 @@ int main(int argc, char* argv[])
 
 
 
-		} while (((key != 'e') && (key != 'E')) || (c_FrameSetTriggered < c_countOfImagesToGrab));
+		} while (((key != 'e') && (key != 'E')) );
 
 
 
