@@ -1,4 +1,4 @@
-// Grab.cpp
+// Grab.cppf
 /*
     Note: Before getting started, Basler recommends reading the Programmer's Guide topic
     in the pylon C++ API documentation that gets installed with pylon.
@@ -51,13 +51,13 @@ enum GrabState { Start, Preview, Burst, Teardown };
 enum KeyAction { NoAction, GainIncrease, GainDecrease, ExposureIncrease, ExposureDecrease, BurstGrab, Quit};
 
 // Number of images to be grabbed.
-static const uint32_t c_countOfImagesToGrab = 100;
+static const uint32_t c_countOfImagesToGrab = 15;
 
 
 //static CBaslerUsbInstantCamera* camera = 0;
 static CGrabResultPtr ptrGrabResult;
 
-static GrabState State = Start;
+static GrabState G_State = Start;
 static KeyAction Action = NoAction;
 static double Exposure = 10000.0;
 static double ExposureStep = 1.18920711; //2**0.25
@@ -73,6 +73,9 @@ CBaslerUsbInstantCameraArray* cameras;
 
 static vector<bool> _IsCameraBW(c_maxCamerasToUse, 0);
 
+void ProcessMessage(KeyAction Action);
+
+
 //Example of an image event handler.
 class CSampleImageEventHandler : public CImageEventHandler
 {
@@ -82,13 +85,16 @@ public:
 		intptr_t cameraContextValue = ptrGrabResult->GetCameraContext();
 
 		#ifdef PYLON_WIN_BUILD
-				// Display the image
 			Pylon::DisplayImage(cameraContextValue, ptrGrabResult);
 		#endif
 
-		/*cout << "CSampleImageEventHandler::OnImageGrabbed called." << std::endl;
-		cout << std::endl;
-		cout << std::endl;*/
+			if (G_State == Burst)
+			{
+				cout << "++++++  Burst: OnImageGrabbed" << endl;
+
+				if(camera.WaitForFrameTriggerReady(300, TimeoutHandling_ThrowException))
+				camera.ExecuteSoftwareTrigger();		
+			}
 	}
 };
 
@@ -142,62 +148,117 @@ void _Quit(){};
 void _StartPreview()
 { 
 	// Create an instant camera object with the camera device found first.
-	if (State == NoAction)
+	if (G_State == NoAction || G_State == Preview)
 	{
-		//camera = new CBaslerUsbInstantCamera(CTlFactory::GetInstance().CreateFirstDevice());
+		cout << "++++++  Preview: Start" << endl;
 
-		//cout << "Using device " << camera->GetDeviceInfo().GetModelName() << endl;
-		//camera->MaxNumBuffer = 5;
-
-		//camera.RegisterConfiguration(new CSoftwareTriggerConfiguration, RegistrationMode_ReplaceAll, Cleanup_Delete);
-		//camera.RegisterConfiguration(new CConfigurationEventPrinter, RegistrationMode_Append, Cleanup_Delete);
-		//camera.RegisterImageEventHandler(new CImageEventPrinter, RegistrationMode_Append, Cleanup_Delete);
 		for (size_t i = 0; i < cameras->GetSize(); ++i)
 		{
+			if (cameras->operator[](i).IsGrabbing())
+				cameras->operator[](i).StopGrabbing();
+
+
 			cameras->operator[](i).Open();
+			//cameras->operator[](i).RegisterConfiguration(new CAcquireContinuousConfiguration, RegistrationMode_Append, Cleanup_Delete);
+			//cameras->operator[](i).RegisterConfiguration(new CConfigurationEventPrinter, RegistrationMode_Append, Cleanup_Delete);
+
 			cameras->operator[](i).GainAuto.SetValue(GainAuto_Off);
 			cameras->operator[](i).Gain.SetValue(int(Gain));
 			cameras->operator[](i).ExposureTime.SetValue(int(Exposure));
+			cameras->operator[](i).MaxNumBuffer = 5;
 
-			cameras->operator[](i).RegisterImageEventHandler(new CSampleImageEventHandler, RegistrationMode_Append, Cleanup_Delete);
+			//cameras->operator[](i).RegisterImageEventHandler(new CSampleImageEventHandler, RegistrationMode_Append, Cleanup_Delete);
+			CAcquireContinuousConfiguration().OnOpened(cameras->operator[](i));
 			cameras->operator[](i).StartGrabbing(GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
-
-			//cameras[i].StartGrabbing(c_countOfImagesToGrab, GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
 		}
-		
-		/*
-		camera->Open();
-		camera->GainAuto.SetValue(GainAuto_Off);
-		camera->Gain.SetValue(int(Gain));
-		camera->ExposureTime.SetValue(int(Exposure));
-
-		camera->RegisterImageEventHandler(new CSampleImageEventHandler, RegistrationMode_Append, Cleanup_Delete);
-		camera->StartGrabbing(GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);*/
 	}
 
 
 //	if (!(camera->IsGrabbing())) exit(0);
 };
 
+
+void _BurstGrab()
+{
+	for (size_t i = 0; i < cameras->GetSize(); ++i)
+	{
+		if (cameras->operator[](i).IsGrabbing())
+			cameras->operator[](i).StopGrabbing();
+
+		cameras->operator[](i).Open();
+		//cameras->operator[](i).RegisterConfiguration(new CSoftwareTriggerConfiguration, RegistrationMode_ReplaceAll, Cleanup_Delete);
+		//cameras->operator[](i).RegisterConfiguration(new CConfigurationEventPrinter, RegistrationMode_Append, Cleanup_Delete);
+		//cameras->operator[](i).AcquisitionMode.SetValue(AcquisitionMode_Continuous);
+
+		/*cameras->operator[](i).TriggerSelector.SetValue(TriggerSelector_FrameStart);
+		cameras->operator[](i).TriggerMode.SetValue(TriggerMode_On);
+		cameras->operator[](i).TriggerSource.SetValue(TriggerSource_Software);*/
+		//cameras->operator[](i).AcquisitionBurstFrameCount.SetValue(c_countOfImagesToGrab);
+		cameras->operator[](i).GainAuto.SetValue(GainAuto_Off);
+		cameras->operator[](i).Gain.SetValue(int(Gain));
+		cameras->operator[](i).ExposureTime.SetValue(int(Exposure));
+		cameras->operator[](i).MaxNumBuffer = 5;
+
+		//cameras->operator[](i).RegisterImageEventHandler(new CSampleImageEventHandler, RegistrationMode_Append, Cleanup_Delete);
+
+		CSoftwareTriggerConfiguration().OnOpened(cameras->operator[](i));
+
+		cameras->operator[](i).StartGrabbing(c_countOfImagesToGrab, GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
+	}
+
+	for (size_t i = 0; i < cameras->GetSize(); ++i)
+	{
+		if (cameras->operator[](i).WaitForFrameTriggerReady(1000, TimeoutHandling_ThrowException))
+		{
+			cameras->operator[](i).ExecuteSoftwareTrigger();
+		}
+	}
+
+	//	char key;
+	//	cin.get(key);
+	// Sleep.
+	//WaitObject::Sleep(1000);
+
+	unsigned char IsBurst = 1;
+
+	while (IsBurst > 0)
+	{
+		for (size_t i = 0; i < cameras->GetSize(); ++i)
+		{
+			IsBurst = 0;
+			WaitObject::Sleep(50);
+			if (cameras->operator[](i).IsGrabbing()) IsBurst++;
+		}
+	}
+	
+	ProcessMessage(NoAction);
+};
+
 void _GainIncrease()
 { 
 	Gain = Gain + GainStep; 
-	//camera->Gain.SetValue(int(Gain));
-	cout << "Camera Gain: " << Gain <<" dB"<< endl;
+	if (Gain > 23.79 ) Gain = 21.0;
+	for (size_t i = 0; i < cameras->GetSize(); ++i)
+	{
+		cameras->operator[](i).Gain.SetValue(Gain);
+	}
+	cout << "Camera Gain: " << Gain << " dB" << endl;
 };
 
 void _GainDecrease()
 {
 	Gain = Gain - GainStep;
 	if (Gain < 0.0) Gain = 0.0;
-	//camera->Gain.SetValue(int(Gain)); 
+	for (size_t i = 0; i < cameras->GetSize(); ++i)
+	{
+		cameras->operator[](i).Gain.SetValue(Gain);
+	}
 	cout << "Camera Gain: " << Gain << " dB" << endl;
 };
 
 void _ExposureIncrease()
 {
 	Exposure = Exposure * ExposureStep;
-	//camera->ExposureTime.SetValue(int(Exposure));
 	for (size_t i = 0; i < cameras->GetSize(); ++i)
 	{
 		if (_IsCameraBW[i])
@@ -236,24 +297,24 @@ void _ExposureDecrease()
 
 };
 
-void _BurstGrab(){};
+
 void _NoAction(){};
 
-GrabState ProcessMessage(GrabState State, KeyAction Action)
+void ProcessMessage(KeyAction Action)
 {
-	PrintState("Was: ", State, Action);
+	PrintState("Was: ", G_State, Action);
 
-	switch (State)
+	switch (G_State)
 	{
 		case Start:
 			switch (Action)
 			{
-				case NoAction: _StartPreview(); State = Preview; break;
-				case GainIncrease: State = Preview; _StartPreview();  break;
-				case GainDecrease: State = Preview; _StartPreview(); break;
-				case ExposureIncrease: State = Preview; _StartPreview(); break;
-				case ExposureDecrease: State = Preview; _StartPreview(); break;
-				case BurstGrab: State = Preview; _StartPreview(); break;
+				case NoAction: _StartPreview(); G_State = Preview; break;
+				case GainIncrease: G_State = Preview; _StartPreview();  break;
+				case GainDecrease: G_State = Preview; _StartPreview(); break;
+				case ExposureIncrease: G_State = Preview; _StartPreview(); break;
+				case ExposureDecrease: G_State = Preview; _StartPreview(); break;
+				case BurstGrab: G_State = Burst; _BurstGrab(); break;
 				case Quit: _Quit(); break;
 				default: break;
 			}
@@ -266,21 +327,21 @@ GrabState ProcessMessage(GrabState State, KeyAction Action)
 				case GainDecrease: _GainDecrease(); break;
 				case ExposureIncrease: _ExposureIncrease(); break;
 				case ExposureDecrease: _ExposureDecrease(); break;
-				case BurstGrab: State = Burst; _BurstGrab(); break;
-				case Quit: State = Teardown; _Quit(); break;
+				case BurstGrab: G_State = Burst; _BurstGrab(); break;
+				case Quit: G_State = Teardown; _Quit(); break;
 				default: break;
 			}
 			break;
 		case Burst:
 			switch (Action)
 			{
-				case NoAction: State = Preview; _StartPreview(); break;
+				case NoAction: G_State = Preview; _StartPreview(); break;
 				case GainIncrease: _NoAction(); break;
 				case GainDecrease: _NoAction(); break;
 				case ExposureIncrease:  _NoAction(); break;
 				case ExposureDecrease:  _NoAction(); break;
 				case BurstGrab:  _NoAction(); break;
-				case Quit: State = Teardown; _Quit(); break;
+				case Quit: G_State = Teardown; _Quit(); break;
 				default: break;
 			}
 			break;
@@ -300,9 +361,9 @@ GrabState ProcessMessage(GrabState State, KeyAction Action)
 		default: break;
 	}
 
-	PrintState("Is now: ", State, Action);
+	PrintState("Is now: ", G_State, Action);
 
-	return State;
+	return;
 }
 
 int main(int argc, char* argv[])
@@ -334,7 +395,7 @@ int main(int argc, char* argv[])
 	{
 		cameras->operator[](i).Attach(tlFactory.CreateDevice(devices[i]));
 
-		//cameras->operator[](i).RegisterConfiguration(new CSoftwareTriggerConfiguration, RegistrationMode_ReplaceAll, Cleanup_Delete);
+		cameras->operator[](i).RegisterConfiguration(new CSoftwareTriggerConfiguration, RegistrationMode_Append, Cleanup_Delete);
 		//cameras->operator[](i).RegisterConfiguration(new CConfigurationEventPrinter, RegistrationMode_Append, Cleanup_Delete);
 
 		//cameras->operator[](i).RegisterImageEventHandler(new CImageEventPrinter, RegistrationMode_Append, Cleanup_Delete);
@@ -389,13 +450,13 @@ int main(int argc, char* argv[])
      
 		char key;
 	
-		State = ProcessMessage(State, Action);
+		ProcessMessage(Action);
 
 		do
 		{
 			cin.get(key);
 			Action = ParseKey(key);
-			State = ProcessMessage(State, Action);
+			ProcessMessage(Action);
 
 		} while (Action != Quit);
 
