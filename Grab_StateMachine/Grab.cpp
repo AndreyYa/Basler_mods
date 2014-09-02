@@ -27,7 +27,7 @@ enum GrabState { Start, Preview, Burst, Teardown };
 enum KeyAction { NoAction, GainIncrease, GainDecrease, ExposureIncrease, ExposureDecrease, BurstGrab, Quit};
 
 static const size_t c_maxCamerasToUse = 1;
-static const uint32_t c_countOfImagesToGrab = 25;
+static const uint32_t c_countOfImagesToGrab = 3;
 static CGrabResultPtr ptrGrabResult;
 
 static GrabState G_State = Start;
@@ -43,9 +43,69 @@ CBaslerUsbInstantCameraArray* cameras;
 
 static vector<vector<double>> _PC_frame_time_table(c_maxCamerasToUse * 2, vector<double>(c_countOfImagesToGrab, 0.0));
 static vector<bool> _IsCameraBW(c_maxCamerasToUse, 0);
-static vector<int> _PC_frame_count(c_maxCamerasToUse, 0);
+static vector<int> _PC_triggered_frame_count(c_maxCamerasToUse, 0);
+static vector<int> _PC_captured_frame_count(c_maxCamerasToUse, 0);
+
+class MyBufferFactory;
+static vector<MyBufferFactory *> _ImageBuffers(c_maxCamerasToUse);
+
+
+static vector<vector<CBaslerUsbGrabResultPtr>> _Grab_results(c_maxCamerasToUse, vector<CBaslerUsbGrabResultPtr>(c_countOfImagesToGrab));
+
 
 void ProcessMessage(KeyAction Action);
+void PrintTimeTable();
+
+class MyBufferFactory : public IBufferFactory
+{
+public:
+	MyBufferFactory()
+		: m_lastBufferContext(1000)
+	{
+	}
+
+	virtual ~MyBufferFactory()
+	{
+	}
+
+	virtual void AllocateBuffer(size_t bufferSize, void** pCreatedBuffer, intptr_t& bufferContext)
+	{
+		try
+		{
+			*pCreatedBuffer = new uint8_t[bufferSize];
+			bufferContext = ++m_lastBufferContext;
+
+			cout << "Created buffer " << bufferContext << ", " << *pCreatedBuffer << endl;
+		}
+		catch (const std::exception&)
+		{
+			if (*pCreatedBuffer != NULL)
+			{
+				delete[] * pCreatedBuffer;
+				*pCreatedBuffer = NULL;
+			}
+
+			throw;
+		}
+	}
+
+	virtual void FreeBuffer(void* pCreatedBuffer, intptr_t bufferContext)
+	{
+		uint8_t* p = reinterpret_cast<uint8_t*>(pCreatedBuffer);
+		delete[] p;
+		cout << "Freed buffer " << bufferContext << ", " << pCreatedBuffer << endl;
+	}
+
+	virtual void DestroyBufferFactory()
+	{
+		delete this;
+	}
+
+protected:
+	unsigned long m_lastBufferContext;
+};
+
+
 
 class CSampleImageEventHandler : public CImageEventHandler
 {
@@ -60,20 +120,83 @@ public:
 			Pylon::DisplayImage(cameraContextValue, ptrGrabResultUsb);
 		#endif
 
-			if (G_State == Burst)
-			{
-				
-				int _frame_index = 0;
-				_frame_index = _PC_frame_count[cameraContextValue];
+		if (G_State == Burst)
+		{
+			int _frame_index = 0;
+			_frame_index = _PC_captured_frame_count[cameraContextValue];
 
-				if (IsReadable(ptrGrabResultUsb->ChunkTimestamp))
-				{
-					_PC_frame_time_table[2 * cameraContextValue + 1][_frame_index] = 0.000000001*(double)ptrGrabResultUsb->ChunkTimestamp.GetValue();
-				}
+			if (IsReadable(ptrGrabResultUsb->ChunkTimestamp))
+			{
+				_PC_frame_time_table[2 * cameraContextValue + 1][_frame_index] = 0.000000001*(double)ptrGrabResultUsb->ChunkTimestamp.GetValue();
 			}
+			_Grab_results[cameraContextValue][_frame_index] = ptrGrabResultUsb;
+
+			cout << "Frame Grabbed      #: " << _PC_captured_frame_count[cameraContextValue] << endl;
+
+			_PC_captured_frame_count[cameraContextValue] += 1;
+
+		}
 	}
 };
 
+
+void _BurstGrab()
+{
+	for (size_t i = 0; i < cameras->GetSize(); ++i)
+	{
+		if (cameras->operator[](i).IsGrabbing())
+			cameras->operator[](i).StopGrabbing();
+
+		cameras->operator[](i).Open();
+		cameras->operator[](i).GainAuto.SetValue(GainAuto_Off);
+		cameras->operator[](i).Gain.SetValue(int(Gain));
+		if (_IsCameraBW[i])
+			cameras->operator[](i).ExposureTime.SetValue(Exposure);
+		else
+			cameras->operator[](i).ExposureTime.SetValue(Exposure*ColorExposureMultiplier);
+		cameras->operator[](i).MaxNumBuffer = 5;
+
+		_PC_triggered_frame_count[i] = 0;
+
+		CSoftwareTriggerConfiguration().OnOpened(cameras->operator[](i));
+		cameras->operator[](i).StartGrabbing(c_countOfImagesToGrab, GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
+	}
+
+	for (size_t j = 0; j < c_countOfImagesToGrab; ++j)
+	{
+		for (size_t i = 0; i < cameras->GetSize(); ++i)
+		{
+			if (cameras->operator[](i).WaitForFrameTriggerReady(1000, TimeoutHandling_ThrowException))
+			{
+				cameras->operator[](i).ExecuteSoftwareTrigger();
+
+
+				_PC_triggered_frame_count[i] = j;
+				cout << "Frame Triggered    #: " << _PC_triggered_frame_count[i] << endl;
+
+				WaitObject::Sleep(10);
+				_PC_frame_time_table[2 * i][j] = (double)clock() / CLOCKS_PER_SEC;
+			}
+		}
+	}
+
+	unsigned char IsBurst = 1;
+
+	while (IsBurst > 0)
+	{
+		for (size_t i = 0; i < cameras->GetSize(); ++i)
+		{
+			IsBurst = 0;
+			WaitObject::Sleep(50);
+			if (cameras->operator[](i).IsGrabbing()) IsBurst++;
+		}
+	}
+
+	PrintTimeTable();
+
+
+	ProcessMessage(NoAction);
+};
 
 void PrintTimeTable()
 {
@@ -166,71 +289,6 @@ void _StartPreview()
 };
 
 
-void _BurstGrab()
-{
-	for (size_t i = 0; i < cameras->GetSize(); ++i)
-	{
-		if (cameras->operator[](i).IsGrabbing())
-			cameras->operator[](i).StopGrabbing();
-
-		cameras->operator[](i).Open();
-		cameras->operator[](i).GainAuto.SetValue(GainAuto_Off);
-		cameras->operator[](i).Gain.SetValue(int(Gain));
-		cameras->operator[](i).ExposureTime.SetValue(int(Exposure));
-		cameras->operator[](i).MaxNumBuffer = 5;
-
-		CSoftwareTriggerConfiguration().OnOpened(cameras->operator[](i));
-		cameras->operator[](i).StartGrabbing(c_countOfImagesToGrab, GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
-
-	}
-
-	/*for (size_t i = 0; i < cameras->GetSize(); ++i)
-	{
-	if (cameras->operator[](i).WaitForFrameTriggerReady(1000, TimeoutHandling_ThrowException))
-	{
-	cameras->operator[](i).ExecuteSoftwareTrigger();
-
-	_PC_frame_count[i] = 0;
-	int _frame_index = _PC_frame_count[i];
-
-	_PC_frame_time_table[2 * i][0] = (double)clock() / CLOCKS_PER_SEC;
-	}
-	}*/
-
-	for (size_t j = 0; j < c_countOfImagesToGrab; ++j)
-	{
-		for (size_t i = 0; i < cameras->GetSize(); ++i)
-		{
-			if (cameras->operator[](i).WaitForFrameTriggerReady(1000, TimeoutHandling_ThrowException))
-			{
-				cameras->operator[](i).ExecuteSoftwareTrigger();
-				_PC_frame_count[i] = j;
-
-				//cout << "++++++  Burst: Frame#: " << j << endl;
-
-				WaitObject::Sleep(50);
-
-				_PC_frame_time_table[2 * i][j] = (double)clock() / CLOCKS_PER_SEC;
-			}
-		}
-	}
-
-	unsigned char IsBurst = 1;
-
-	while (IsBurst > 0)
-	{
-		for (size_t i = 0; i < cameras->GetSize(); ++i)
-		{
-			IsBurst = 0;
-			WaitObject::Sleep(50);
-			if (cameras->operator[](i).IsGrabbing()) IsBurst++;
-		}
-	}
-	
-	PrintTimeTable();
-
-	ProcessMessage(NoAction);
-};
 
 void _GainIncrease()
 { 
@@ -384,6 +442,11 @@ int main(int argc, char* argv[])
 		cameras->operator[](i).RegisterConfiguration(new CSoftwareTriggerConfiguration, RegistrationMode_Append, Cleanup_Delete);
 		cameras->operator[](i).RegisterImageEventHandler(new CSampleImageEventHandler, RegistrationMode_Append, Cleanup_Delete);
 		cameras->operator[](i).Open();
+
+
+
+		_ImageBuffers[i] = new MyBufferFactory();
+		cameras->operator[](i).SetBufferFactory(_ImageBuffers[i], Cleanup_None);
 
 		CDeviceInfo & diRef = devices[i];
 
