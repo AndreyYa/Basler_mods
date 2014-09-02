@@ -57,7 +57,7 @@ public:
 		CBaslerUsbGrabResultPtr ptrGrabResultUsb = ptrGrabResult;
 
 		#ifdef PYLON_WIN_BUILD
-		Pylon::DisplayImage(cameraContextValue, ptrGrabResultUsb);
+			Pylon::DisplayImage(cameraContextValue, ptrGrabResultUsb);
 		#endif
 
 			if (G_State == Burst)
@@ -69,22 +69,6 @@ public:
 				if (IsReadable(ptrGrabResultUsb->ChunkTimestamp))
 				{
 					_PC_frame_time_table[2 * cameraContextValue + 1][_frame_index] = 0.000000001*(double)ptrGrabResultUsb->ChunkTimestamp.GetValue();
-				}
-				//cout << "++++++  Burst: OnImageGrabbed Frame#: " << _frame_index  << endl;
-
-				//_PC_frame_count[cameraContextValue] += 1;
-				if (camera.WaitForFrameTriggerReady(300, TimeoutHandling_ThrowException))
-				{
-					camera.ExecuteSoftwareTrigger();
-					
-					if (_frame_index < c_countOfImagesToGrab - 1)
-					{
-						_PC_frame_count[cameraContextValue] += 1;
-
-						_frame_index = _PC_frame_count[cameraContextValue];
-
-						_PC_frame_time_table[2 * cameraContextValue][_frame_index] = (double)clock() / CLOCKS_PER_SEC;
-					}
 				}
 			}
 	}
@@ -197,19 +181,37 @@ void _BurstGrab()
 
 		CSoftwareTriggerConfiguration().OnOpened(cameras->operator[](i));
 		cameras->operator[](i).StartGrabbing(c_countOfImagesToGrab, GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
-		
+
 	}
 
-	for (size_t i = 0; i < cameras->GetSize(); ++i)
+	/*for (size_t i = 0; i < cameras->GetSize(); ++i)
 	{
-		if (cameras->operator[](i).WaitForFrameTriggerReady(1000, TimeoutHandling_ThrowException))
-		{
-			cameras->operator[](i).ExecuteSoftwareTrigger();
+	if (cameras->operator[](i).WaitForFrameTriggerReady(1000, TimeoutHandling_ThrowException))
+	{
+	cameras->operator[](i).ExecuteSoftwareTrigger();
 
-			_PC_frame_count[i] = 0;
-			int _frame_index = _PC_frame_count[i];
-			
-			_PC_frame_time_table[2 * i][0] = (double)clock() / CLOCKS_PER_SEC;
+	_PC_frame_count[i] = 0;
+	int _frame_index = _PC_frame_count[i];
+
+	_PC_frame_time_table[2 * i][0] = (double)clock() / CLOCKS_PER_SEC;
+	}
+	}*/
+
+	for (size_t j = 0; j < c_countOfImagesToGrab; ++j)
+	{
+		for (size_t i = 0; i < cameras->GetSize(); ++i)
+		{
+			if (cameras->operator[](i).WaitForFrameTriggerReady(1000, TimeoutHandling_ThrowException))
+			{
+				cameras->operator[](i).ExecuteSoftwareTrigger();
+				_PC_frame_count[i] = j;
+
+				//cout << "++++++  Burst: Frame#: " << j << endl;
+
+				WaitObject::Sleep(50);
+
+				_PC_frame_time_table[2 * i][j] = (double)clock() / CLOCKS_PER_SEC;
+			}
 		}
 	}
 
