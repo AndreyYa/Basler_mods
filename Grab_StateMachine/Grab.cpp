@@ -1,60 +1,33 @@
-// Grab.cppf
-/*
-    Note: Before getting started, Basler recommends reading the Programmer's Guide topic
-    in the pylon C++ API documentation that gets installed with pylon.
-    If you are upgrading to a higher major version of pylon, Basler also
-    strongly recommends reading the Migration topic in the pylon C++ API documentation.
-
-    This sample illustrates how to grab and process images using the CInstantCamera class.
-    The images are grabbed and processed asynchronously, i.e.,
-    while the application is processing a buffer, the acquisition of the next buffer is done
-    in parallel.
-
-    The CInstantCamera class uses a pool of buffers to retrieve image data
-    from the camera device. Once a buffer is filled and ready,
-    the buffer can be retrieved from the camera object for processing. The buffer
-    and additional image data are collected in a grab result. The grab result is
-    held by a smart pointer after retrieval. The buffer is automatically reused
-    when explicitly released or when the smart pointer object is destroyed.
-*/
 
 // Include files to use the PYLON API.
 #include <pylon/PylonIncludes.h>
-#ifdef PYLON_WIN_BUILD
-#    include <pylon/PylonGUI.h>
-#endif
+#include <pylon/PylonGUI.h>
+
 
 #define USE_USB
+using namespace Pylon;
+
 #include <pylon/usb/BaslerUsbInstantCamera.h>
 #include <pylon/usb/BaslerUsbInstantCameraArray.h>
-#include <pylon/usb/BaslerUsbDeviceInfo.h>
-
-
-//#include <pylon/usb/CUsbCameraParams_Params.h>
-
-// Namespace for using pylon objects.
+//#include <pylon/usb/BaslerUsbDeviceInfo.h>
 typedef Pylon::CBaslerUsbInstantCamera Camera_t;
 typedef Pylon::CBaslerUsbImageEventHandler ImageEventHandler_t; // Or use Camera_t::ImageEventHandler_t
 typedef Pylon::CBaslerUsbGrabResultPtr GrabResultPtr_t; // Or use Camera_t::GrabResultPtr_t
-
+using namespace Basler_UsbCameraParams;
 #include "../include/ConfigurationEventPrinter.h"
 #include "../include/ImageEventPrinter.h"
-#include <time.h>
 
-using namespace Pylon;
+
 using namespace std;
-using namespace Basler_UsbCameraParams;
 
 
+#include <time.h>
 
 enum GrabState { Start, Preview, Burst, Teardown };
 enum KeyAction { NoAction, GainIncrease, GainDecrease, ExposureIncrease, ExposureDecrease, BurstGrab, Quit};
 
-// Number of images to be grabbed.
-static const uint32_t c_countOfImagesToGrab = 15;
-
-
-//static CBaslerUsbInstantCamera* camera = 0;
+static const size_t c_maxCamerasToUse = 1;
+static const uint32_t c_countOfImagesToGrab = 25;
 static CGrabResultPtr ptrGrabResult;
 
 static GrabState G_State = Start;
@@ -66,17 +39,14 @@ static double ColorExposureMultiplier = 2.5;
 static double Gain = 0.0;
 static double GainStep = 3.0;
 
-// Number of images to be grabbed.
-//static const uint32_t c_countOfImagesToGrab = 30;
-static const size_t c_maxCamerasToUse = 2;
 CBaslerUsbInstantCameraArray* cameras;
 
+static vector<vector<double>> _PC_frame_time_table(c_maxCamerasToUse * 2, vector<double>(c_countOfImagesToGrab, 0.0));
 static vector<bool> _IsCameraBW(c_maxCamerasToUse, 0);
+static vector<int> _PC_frame_count(c_maxCamerasToUse, 0);
 
 void ProcessMessage(KeyAction Action);
 
-
-//Example of an image event handler.
 class CSampleImageEventHandler : public CImageEventHandler
 {
 public:
@@ -84,19 +54,57 @@ public:
 	{
 		intptr_t cameraContextValue = ptrGrabResult->GetCameraContext();
 
+		CBaslerUsbGrabResultPtr ptrGrabResultUsb = ptrGrabResult;
+
 		#ifdef PYLON_WIN_BUILD
-			Pylon::DisplayImage(cameraContextValue, ptrGrabResult);
+		Pylon::DisplayImage(cameraContextValue, ptrGrabResultUsb);
 		#endif
 
 			if (G_State == Burst)
 			{
-				cout << "++++++  Burst: OnImageGrabbed" << endl;
+				
+				int _frame_index = 0;
+				_frame_index = _PC_frame_count[cameraContextValue];
 
-				if(camera.WaitForFrameTriggerReady(300, TimeoutHandling_ThrowException))
-				camera.ExecuteSoftwareTrigger();		
+				if (IsReadable(ptrGrabResultUsb->ChunkTimestamp))
+				{
+					_PC_frame_time_table[2 * cameraContextValue + 1][_frame_index] = 0.000000001*(double)ptrGrabResultUsb->ChunkTimestamp.GetValue();
+				}
+				//cout << "++++++  Burst: OnImageGrabbed Frame#: " << _frame_index  << endl;
+
+				//_PC_frame_count[cameraContextValue] += 1;
+				if (camera.WaitForFrameTriggerReady(300, TimeoutHandling_ThrowException))
+				{
+					camera.ExecuteSoftwareTrigger();
+					
+					if (_frame_index < c_countOfImagesToGrab - 1)
+					{
+						_PC_frame_count[cameraContextValue] += 1;
+
+						_frame_index = _PC_frame_count[cameraContextValue];
+
+						_PC_frame_time_table[2 * cameraContextValue][_frame_index] = (double)clock() / CLOCKS_PER_SEC;
+					}
+				}
 			}
 	}
 };
+
+
+void PrintTimeTable()
+{
+	for (size_t i = 0; i < c_countOfImagesToGrab - 1; ++i)
+	{
+		cout << "Camera";
+		//for (size_t j = 0; j < c_maxCamerasToUse; ++j)
+		for (size_t j = 0; j < c_maxCamerasToUse; ++j)
+		{
+			cout << " #" << j << ": " << _PC_frame_time_table[2 * j][i + 1] - _PC_frame_time_table[2 * j][i] << " Cam Time:" << _PC_frame_time_table[2 * j + 1][i + 1] - _PC_frame_time_table[2 * j + 1][i];
+		}
+		cout << endl;
+	}
+}
+
 
 KeyAction ParseKey(char key)
 {
@@ -147,7 +155,6 @@ void _Quit(){};
 
 void _StartPreview()
 { 
-	// Create an instant camera object with the camera device found first.
 	if (G_State == NoAction || G_State == Preview)
 	{
 		cout << "++++++  Preview: Start" << endl;
@@ -157,24 +164,21 @@ void _StartPreview()
 			if (cameras->operator[](i).IsGrabbing())
 				cameras->operator[](i).StopGrabbing();
 
-
 			cameras->operator[](i).Open();
-			//cameras->operator[](i).RegisterConfiguration(new CAcquireContinuousConfiguration, RegistrationMode_Append, Cleanup_Delete);
-			//cameras->operator[](i).RegisterConfiguration(new CConfigurationEventPrinter, RegistrationMode_Append, Cleanup_Delete);
-
 			cameras->operator[](i).GainAuto.SetValue(GainAuto_Off);
 			cameras->operator[](i).Gain.SetValue(int(Gain));
-			cameras->operator[](i).ExposureTime.SetValue(int(Exposure));
+		
+			if (_IsCameraBW[i])
+				cameras->operator[](i).ExposureTime.SetValue(Exposure);
+			else
+				cameras->operator[](i).ExposureTime.SetValue(Exposure*ColorExposureMultiplier);
+
 			cameras->operator[](i).MaxNumBuffer = 5;
 
-			//cameras->operator[](i).RegisterImageEventHandler(new CSampleImageEventHandler, RegistrationMode_Append, Cleanup_Delete);
 			CAcquireContinuousConfiguration().OnOpened(cameras->operator[](i));
 			cameras->operator[](i).StartGrabbing(GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
 		}
 	}
-
-
-//	if (!(camera->IsGrabbing())) exit(0);
 };
 
 
@@ -186,24 +190,14 @@ void _BurstGrab()
 			cameras->operator[](i).StopGrabbing();
 
 		cameras->operator[](i).Open();
-		//cameras->operator[](i).RegisterConfiguration(new CSoftwareTriggerConfiguration, RegistrationMode_ReplaceAll, Cleanup_Delete);
-		//cameras->operator[](i).RegisterConfiguration(new CConfigurationEventPrinter, RegistrationMode_Append, Cleanup_Delete);
-		//cameras->operator[](i).AcquisitionMode.SetValue(AcquisitionMode_Continuous);
-
-		/*cameras->operator[](i).TriggerSelector.SetValue(TriggerSelector_FrameStart);
-		cameras->operator[](i).TriggerMode.SetValue(TriggerMode_On);
-		cameras->operator[](i).TriggerSource.SetValue(TriggerSource_Software);*/
-		//cameras->operator[](i).AcquisitionBurstFrameCount.SetValue(c_countOfImagesToGrab);
 		cameras->operator[](i).GainAuto.SetValue(GainAuto_Off);
 		cameras->operator[](i).Gain.SetValue(int(Gain));
 		cameras->operator[](i).ExposureTime.SetValue(int(Exposure));
 		cameras->operator[](i).MaxNumBuffer = 5;
 
-		//cameras->operator[](i).RegisterImageEventHandler(new CSampleImageEventHandler, RegistrationMode_Append, Cleanup_Delete);
-
 		CSoftwareTriggerConfiguration().OnOpened(cameras->operator[](i));
-
 		cameras->operator[](i).StartGrabbing(c_countOfImagesToGrab, GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
+		
 	}
 
 	for (size_t i = 0; i < cameras->GetSize(); ++i)
@@ -211,13 +205,13 @@ void _BurstGrab()
 		if (cameras->operator[](i).WaitForFrameTriggerReady(1000, TimeoutHandling_ThrowException))
 		{
 			cameras->operator[](i).ExecuteSoftwareTrigger();
+
+			_PC_frame_count[i] = 0;
+			int _frame_index = _PC_frame_count[i];
+			
+			_PC_frame_time_table[2 * i][0] = (double)clock() / CLOCKS_PER_SEC;
 		}
 	}
-
-	//	char key;
-	//	cin.get(key);
-	// Sleep.
-	//WaitObject::Sleep(1000);
 
 	unsigned char IsBurst = 1;
 
@@ -231,6 +225,8 @@ void _BurstGrab()
 		}
 	}
 	
+	PrintTimeTable();
+
 	ProcessMessage(NoAction);
 };
 
@@ -272,14 +268,11 @@ void _ExposureIncrease()
 			cout << "Camera Color Exposure: " << Exposure*ColorExposureMultiplier << " mks" << endl;
 		}
 	}
-
 };
 
 void _ExposureDecrease()
 {
 	Exposure = Exposure / ExposureStep;
-	//camera->ExposureTime.SetValue(int(Exposure));
-	//cout << "Camera Exposure: " << Exposure << " mks" << endl;
 
 	for (size_t i = 0; i < cameras->GetSize(); ++i)
 	{
@@ -294,9 +287,7 @@ void _ExposureDecrease()
 			cout << "Camera Color Exposure: " << Exposure*ColorExposureMultiplier << " mks" << endl;
 		}
 	}
-
 };
-
 
 void _NoAction(){};
 
@@ -362,21 +353,15 @@ void ProcessMessage(KeyAction Action)
 	}
 
 	PrintState("Is now: ", G_State, Action);
-
 	return;
 }
 
 int main(int argc, char* argv[])
 {
-    // The exit code of the sample application.
-    int exitCode = 0;
 
-    // Automagically call PylonInitialize and PylonTerminate to ensure the pylon runtime system
-    // is initialized during the lifetime of this object.
+    int exitCode = 0;
     Pylon::PylonAutoInitTerm autoInitTerm;
 	
-
-
 	CDeviceInfo info;
 	info.SetDeviceClass(Camera_t::DeviceClass());
 	CTlFactory& tlFactory = CTlFactory::GetInstance();
@@ -394,15 +379,9 @@ int main(int argc, char* argv[])
 	for (size_t i = 0; i < cameras->GetSize(); ++i)
 	{
 		cameras->operator[](i).Attach(tlFactory.CreateDevice(devices[i]));
-
 		cameras->operator[](i).RegisterConfiguration(new CSoftwareTriggerConfiguration, RegistrationMode_Append, Cleanup_Delete);
-		//cameras->operator[](i).RegisterConfiguration(new CConfigurationEventPrinter, RegistrationMode_Append, Cleanup_Delete);
-
-		//cameras->operator[](i).RegisterImageEventHandler(new CImageEventPrinter, RegistrationMode_Append, Cleanup_Delete);
 		cameras->operator[](i).RegisterImageEventHandler(new CSampleImageEventHandler, RegistrationMode_Append, Cleanup_Delete);
-
 		cameras->operator[](i).Open();
-
 
 		CDeviceInfo & diRef = devices[i];
 
@@ -417,17 +396,13 @@ int main(int argc, char* argv[])
 
 		//cameras->operator[](i).PixelFormat.SetValue(PixelFormat_Mono12);
 
-		cameras->operator[](i).Gain.SetValue(0);
+		//cameras->operator[](i).Gain.SetValue(0);
 	
 		if (_IsCameraBW[i])
 			cameras->operator[](i).ExposureTime.SetValue(Exposure);
 		else 
 			cameras->operator[](i).ExposureTime.SetValue(Exposure*ColorExposureMultiplier);
-
-		// Print the model name of the camera.
 		cout << "Using device " << cameras->operator[](i).GetDeviceInfo().GetModelName() << endl;
-
-
 
 		if (GenApi::IsWritable(cameras->operator[](i).ChunkModeActive))
 		{
@@ -438,20 +413,15 @@ int main(int argc, char* argv[])
 			throw RUNTIME_EXCEPTION("The camera doesn't support chunk features");
 		}
 
-		// Enable time stamp chunks.
 		cameras->operator[](i).ChunkSelector.SetValue(ChunkSelector_Timestamp);
 		cameras->operator[](i).ChunkEnable.SetValue(true);
-
 	}
 
-
     try
-    {
-     
+    {    
 		char key;
 	
 		ProcessMessage(Action);
-
 		do
 		{
 			cin.get(key);
