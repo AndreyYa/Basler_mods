@@ -27,14 +27,16 @@ enum GrabState { Start, Preview, Burst, Teardown };
 enum KeyAction { NoAction, GainIncrease, GainDecrease, ExposureIncrease, ExposureDecrease, BurstGrab, Quit};
 
 static const size_t c_maxCamerasToUse = 1;
-static const uint32_t c_countOfImagesToGrab = 3;
-static CGrabResultPtr ptrGrabResult;
+static const uint32_t c_countOfImagesToGrab = 15;
+//static CGrabResultPtr ptrGrabResult;
 
 static GrabState G_State = Start;
 static KeyAction Action = NoAction;
 static double Exposure = 10000.0;
 static double ExposureStep = 1.18920711; //2**0.25
 static double ColorExposureMultiplier = 2.5;
+static int BurstCounter = 0;
+static char filename[] = "Burst";
 
 static double Gain = 0.0;
 static double GainStep = 3.0;
@@ -55,6 +57,7 @@ static vector<vector<CBaslerUsbGrabResultPtr>> _Grab_results(c_maxCamerasToUse, 
 
 void ProcessMessage(KeyAction Action);
 void PrintTimeTable();
+void _StoreFrames(int, char*);
 
 class MyBufferFactory : public IBufferFactory
 {
@@ -124,14 +127,18 @@ public:
 		{
 			int _frame_index = 0;
 			_frame_index = _PC_captured_frame_count[cameraContextValue];
+			
+			cout << "Frame Grabbed      #: " << _frame_index << endl;
 
 			if (IsReadable(ptrGrabResultUsb->ChunkTimestamp))
 			{
 				_PC_frame_time_table[2 * cameraContextValue + 1][_frame_index] = 0.000000001*(double)ptrGrabResultUsb->ChunkTimestamp.GetValue();
 			}
+			
+			
 			_Grab_results[cameraContextValue][_frame_index] = ptrGrabResultUsb;
 
-			cout << "Frame Grabbed      #: " << _PC_captured_frame_count[cameraContextValue] << endl;
+			
 
 			_PC_captured_frame_count[cameraContextValue] += 1;
 
@@ -154,9 +161,10 @@ void _BurstGrab()
 			cameras->operator[](i).ExposureTime.SetValue(Exposure);
 		else
 			cameras->operator[](i).ExposureTime.SetValue(Exposure*ColorExposureMultiplier);
-		cameras->operator[](i).MaxNumBuffer = 5;
+		cameras->operator[](i).MaxNumBuffer = c_countOfImagesToGrab;
 
 		_PC_triggered_frame_count[i] = 0;
+		_PC_captured_frame_count[i] = 0;
 
 		CSoftwareTriggerConfiguration().OnOpened(cameras->operator[](i));
 		cameras->operator[](i).StartGrabbing(c_countOfImagesToGrab, GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
@@ -194,8 +202,68 @@ void _BurstGrab()
 
 	PrintTimeTable();
 
+	BurstCounter++;
+	//_StoreFrames(BurstCounter, filename);
+
+	for (size_t j = 0; j < c_countOfImagesToGrab; ++j)
+	{
+		for (size_t i = 0; i < cameras->GetSize(); ++i)
+		{
+			_Grab_results[i][j].Release();
+		}
+	}
 
 	ProcessMessage(NoAction);
+};
+
+void _StoreFrames(int Label, char *filename)
+{
+
+	for (size_t i = 0; i < cameras->GetSize(); ++i)
+	{
+		char camSerialNumber[100];
+		char camColor[50];
+		
+		if (_IsCameraBW[i] == true)
+		{
+			sprintf(camColor, "BW");
+		}
+		else
+		{
+			sprintf(camColor, "Color");
+		}
+
+		for (size_t j = 0; j < c_countOfImagesToGrab; ++j)
+		{	
+			if (_Grab_results[i][j]->GrabSucceeded())
+			{
+				const uint16_t *pImageBuffer = (uint16_t *)(_Grab_results[i][j]->GetBuffer());
+				size_t VbufferSize = _Grab_results[i][j]->GetImageSize();
+				void* Vbuffer = _Grab_results[i][j]->GetBuffer();
+				uint32_t Vwidth = _Grab_results[i][j]->GetWidth();
+				uint32_t Vheight = _Grab_results[i][j]->GetHeight();
+				FILE* pFile;
+				char raw_filename[512];
+				sprintf(raw_filename, "%s-%s-%iX%i-%u-%d-%d.raw", filename, camColor, Vwidth, Vheight, camSerialNumber, Label, j);
+				pFile = fopen(raw_filename, "wb");
+				if (pFile) fwrite(Vbuffer, 1, VbufferSize, pFile);
+				else printf("Can't open file");
+				fclose(pFile);
+
+				CPylonImage imageToSave;
+				imageToSave.AttachGrabResultBuffer(_Grab_results[i][j]);
+
+				char bmp_filename[512];
+				sprintf(bmp_filename, "%s-%iX%i-%u-%d-%d.png", filename, Vwidth, Vheight, camSerialNumber, Label, j);
+
+				imageToSave.Save(ImageFileFormat_Png, bmp_filename);
+
+			}
+		}
+	}
+
+	
+
 };
 
 void PrintTimeTable()
@@ -260,6 +328,15 @@ void PrintState(char* Head, GrabState State, KeyAction Action)
 
 void _Quit(){};
 
+void _StopPreview()
+{
+	for (size_t i = 0; i < cameras->GetSize(); ++i)
+	{
+		if (cameras->operator[](i).IsGrabbing())
+			cameras->operator[](i).StopGrabbing();
+	}
+}
+
 void _StartPreview()
 { 
 	if (G_State == NoAction || G_State == Preview)
@@ -280,7 +357,7 @@ void _StartPreview()
 			else
 				cameras->operator[](i).ExposureTime.SetValue(Exposure*ColorExposureMultiplier);
 
-			cameras->operator[](i).MaxNumBuffer = 5;
+			cameras->operator[](i).MaxNumBuffer = 2;
 
 			CAcquireContinuousConfiguration().OnOpened(cameras->operator[](i));
 			cameras->operator[](i).StartGrabbing(GrabStrategy_OneByOne, GrabLoop_ProvidedByInstantCamera);
@@ -378,7 +455,7 @@ void ProcessMessage(KeyAction Action)
 				case GainDecrease: _GainDecrease(); break;
 				case ExposureIncrease: _ExposureIncrease(); break;
 				case ExposureDecrease: _ExposureDecrease(); break;
-				case BurstGrab: G_State = Burst; _BurstGrab(); break;
+				case BurstGrab: _StopPreview(); G_State = Burst; _BurstGrab(); break;
 				case Quit: G_State = Teardown; _Quit(); break;
 				default: break;
 			}
@@ -444,6 +521,7 @@ int main(int argc, char* argv[])
 		cameras->operator[](i).Open();
 
 
+		
 
 		_ImageBuffers[i] = new MyBufferFactory();
 		cameras->operator[](i).SetBufferFactory(_ImageBuffers[i], Cleanup_None);
@@ -453,10 +531,12 @@ int main(int argc, char* argv[])
 		if (diRef.GetModelName().find(GenICam::gcstring("acA2500-14uc")) != GenICam::gcstring::_npos())
 		{
 			_IsCameraBW[i] = false;
+			cameras->operator[](i).PixelFormat.SetValue(PixelFormat_BayerGB12);
 		}
 		else if (diRef.GetModelName().find(GenICam::gcstring("acA2500-14um")) != GenICam::gcstring::_npos())
 		{
 			_IsCameraBW[i] = true;
+			cameras->operator[](i).PixelFormat.SetValue(PixelFormat_Mono12);
 		}
 
 		//cameras->operator[](i).PixelFormat.SetValue(PixelFormat_Mono12);
